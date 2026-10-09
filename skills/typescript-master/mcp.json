@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vtsls": {
+      "command": "npx",
+      "args": ["@vtsls/language-server", "--stdio"]
+    }
+  }
+}

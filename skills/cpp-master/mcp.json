@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "clangd": {
+      "command": "clangd",
+      "args": [
+        "--background-index",
+        "--clang-tidy",
+        "--header-insertion=iwyu"
+      ]
+    }
+  }
+}

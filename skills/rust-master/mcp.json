@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "rust-analyzer": {
+      "command": "rust-analyzer",
+      "args": [],
+      "env": {
+        "RA_LOG": "info",
+        "RUST_LOG": "info"
+      },
+      "description": "Native Rust Language Server for code navigation, hover types, and semantic search."
+    }
+  }
+}
