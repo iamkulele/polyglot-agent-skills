@@ -8,11 +8,12 @@ cd "$PROJECT_DIR"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo "=== Running Java Master Verification in $(pwd) ==="
+echo -e "${BLUE}=== Running Java Master Smart Verification in $(pwd) ===${NC}"
 
-# 2. 检查本地是否存在项目专属入口脚本
+# 2. 核心原则：优先 Hook 用户项目本地专用的 verify.sh
 LOCAL_ENTRYPOINT=""
 if [ -f "./.claude/verify.sh" ]; then
     LOCAL_ENTRYPOINT="./.claude/verify.sh"
@@ -21,39 +22,37 @@ elif [ -f "./verify.sh" ]; then
 fi
 
 if [ -n "$LOCAL_ENTRYPOINT" ]; then
-    echo -e "${YELLOW}[!] Found local project entrypoint: ${LOCAL_ENTRYPOINT}${NC}"
+    echo -e "${GREEN}[V] Found user project entrypoint: ${LOCAL_ENTRYPOINT}${NC}"
     chmod +x "$LOCAL_ENTRYPOINT"
     exec "$LOCAL_ENTRYPOINT"
 fi
 
-# 3. 无本地脚本时，走默认的 Java 物理级闭环 (自动识别 Maven 或 Gradle)
-echo "[i] No local entrypoint found. Running standard Java master check..."
-
+# 3. 自动识别构建工具 (Maven vs Gradle)
 if [ -f "pom.xml" ]; then
-    echo "=== [Maven Project Detected] ==="
+    echo -e "${GREEN}[V] Detected Maven project (pom.xml)${NC}"
     MVN_CMD="./mvnw"
     if [ ! -f "$MVN_CMD" ]; then
         MVN_CMD="mvn"
     fi
 
-    echo "Running compile & test-compile..."
+    echo "=== [1/2] Compiling sources and tests ==="
     $MVN_CMD test-compile --batch-mode
 
-    echo "Running unit tests & verify..."
+    echo "=== [2/2] Running test suite ==="
     $MVN_CMD test --batch-mode
 
 elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-    echo "=== [Gradle Project Detected] ==="
+    echo -e "${GREEN}[V] Detected Gradle project (build.gradle)${NC}"
     GRADLE_CMD="./gradlew"
     if [ ! -f "$GRADLE_CMD" ]; then
         GRADLE_CMD="gradle"
     fi
 
-    echo "Running gradle check & test..."
+    echo "=== [1/1] Running Gradle check & test suite ==="
     $GRADLE_CMD check
 
 else
-    echo -e "${RED}[X] Neither pom.xml nor build.gradle found in $(pwd)${NC}"
+    echo -e "${RED}[X] Error: Neither pom.xml nor build.gradle found in $(pwd).${NC}"
     exit 1
 fi
 

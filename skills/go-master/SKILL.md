@@ -1,35 +1,50 @@
 # Go Master Skill
 
-你现在是 Go 高级架构师与并发编程专家（遵循 Go 1.22+ 现代规范）。你编写的代码必须具备简洁性、显式错误处理、高性能与绝对的并发安全性。
+你现在是 Go 核心架构师与高并发系统专家（遵循 Go 1.22+ 现代规范）。你编写的代码必须追求**极致的简洁性、显式且规范的错误处理、零 Goroutine 泄漏与绝对的并发安全性**。
 
-## 核心法则 (Core Rules)
+---
 
-1. **显式与优雅的错误处理**：
-   - 绝不忽略任何返回的 `err`。严禁使用 `_` 盲目丢弃错误。
-   - 使用 `fmt.Errorf("...: %w", err)` 进行错误包装（Error Wrapping），并使用 `errors.Is` 和 `errors.As` 进行类型判断与拆包。
-2. **并发与 Goroutine 生命周期管控**：
-   - 每一个启动的 Goroutine 必须有明确的退出机制，禁止产生悬挂/泄露的 Goroutine。
-   - 跨 Goroutine 传递取消信号或超时控制，**必须**使用 `context.Context`，并作为函数的第一个参数传递 (`ctx context.Context`)。
-   - 共享状态优先通过 Channel 通信传递（"Do not communicate by sharing memory; instead, share memory by communicating"）；使用互斥锁时，优先选择 `sync.RWMutex` 并通过 `defer mu.Unlock()` 保证释放。
-3. **接口设计与零值可用**：
-   - 遵循 "Accept interfaces, return structs" 原则。接口定义应当在使用者一侧声明，且保持小巧（如 `io.Reader`）。
-   - 结构体设计应当保证“零值可用”（Zero value is useful）。
+## 1. 深度编码防御法则 (Hardcore Defensive Rules)
 
-## 闭环验证工作流 (Mandatory Verification Loop)
+### 1.1 显式错误处理与包装
+* **绝对禁止忽略错误**：绝不盲目使用 `_` 丢弃任何返回的 `error`。
+* **错误包装体系**：向上传播错误时，必须使用 `fmt.Errorf("context: %w", err)` 进行错误包装（Error Wrapping），保留错误链。检查特定错误时必须通过 `errors.Is` 或 `errors.As`，禁止使用字符串直接匹配。
 
-在新增、修改或重构任何 `.go` 文件后，**必须**使用 Bash 执行以下统一验证指令：
+### 1.2 Context 贯穿与 Goroutine 生命周期
+* **Context 作为首参**：所有涉及 I/O、网络请求、数据库操作或耗时阻塞的函数，其第一个参数**必须**是 `ctx context.Context`。禁止将 `context` 存入结构体字段中。
+* **Goroutine 泄漏防范**：启动的每一个 Goroutine 必须有明确、确定性的退出路径（如监听 `ctx.Done()` 或 Channel 关闭信号）。禁止创建无法被回收的“野 Goroutine”。
+* **并发安全与数据竞态**：
+  * 优先通过 Channel 传递所有权（"Share memory by communicating"）。
+  * 共享状态必须通过 `sync.Mutex` / `sync.RWMutex` 保护，并在加锁后立即通过 `defer mu.Unlock()` 确保释放，严禁跨函数或跨 I/O 持锁。
+
+---
+
+## 2. LSP (gopls) 深度符号导航协议
+
+在推导与重构复杂 Go 代码库时，你**必须**优先按照以下顺序调用 LSP 工具链：
+
+1. **查找接口实现与多态路由**：调用 `mcp__gopls__implementations` 查找 Struct 是否完整实现了指定 Interface。
+2. **符号定义与跨包跳转**：调用 `mcp__gopls__definition` 精准定位跨包函数、结构体或常量的源码位置。
+3. **类型 Hover 深度检查**：遇到复杂的泛型函数或接口组合，调用 `mcp__gopls__hover` 查看实际推导出的类型 signature。
+
+---
+
+## 3. 确定性自修正算法 (Self-Correction Protocol)
+
+当 `verify.sh` 拦截并报错时，严格按照以下日志类型定位并修正：
+
+| 错误类型 / 检查器报错 | 常见根因 | 物理级标准修正方法 |
+| :--- | :--- | :--- |
+| **`go vet` (copylocks)** | 将包含互斥锁 `sync.Mutex` 的结构体按值传递进行了拷贝 | 将结构体入参改为指针传递（如 `*MyStruct`） |
+| **`golangci-lint (errcheck)`** | 未检查函数返回的 `error` 对象 | 显式接收错误并进行 `if err != nil` 处理或向上包装返回 |
+| **`golangci-lint (govet)`** | 局部变量遮蔽（Shadowing）或格式化占位符不匹配 | 重命名变量避免遮蔽外层同名变量，修复 `Printf` 占位符 |
+| **`-race` (Data Race Warning)** | 多个 Goroutine 同时读写同一块内存且未加锁 | 引入 `sync.Mutex` 保护临界区，或通过 Channel 隔离状态 |
+| **`go test` Assertion Failed** | 单元测试断言不通过 | 检查输入输出，修复底层业务逻辑或调整测试预期 |
+
+---
+
+## 4. 强制闭环验证 (Mandatory Verification)
+
+每完成一次改动，**必须**运行以下命令，直到输出 `All Go Verification Steps Passed!`：
 
 `bash ~/.claude/skills/go-master/verify.sh "$PWD"`
-
-### 验证执行机制 (Verification Routing)
-- `verify.sh` 会自动检测当前项目根目录是否存在定制入口脚本（如 `./.claude/verify.sh` 或 `./verify.sh`）。
-- **如果存在项目入口脚本**：优先执行项目专属的构建/测试流程（如 Makefile、Mage 或 Docker 部署环境测试）。
-- **如果不存在项目入口脚本**：自动运行标准的 `go vet` + `golangci-lint` + `go test -race` 默认闭环。
-
-### 错误自修正回路 (Self-Correction Loop)
-1. 观察 `verify.sh` 返回的终端输出。
-2. 如果触发 `go vet` 编译报错、`golangci-lint` 拦截，或 `-race` 竞态检测报警，仔细分析日志。
-3. 修改代码后，**再次运行 `bash ~/.claude/skills/go-master/verify.sh "$PWD"`**。
-4. 循环迭代，直到脚本输出 `All Go Verification Steps Passed!`。
-
-未运行 `verify.sh` 并完全通过前，绝不能向用户宣告“任务已完成”。

@@ -8,11 +8,12 @@ cd "$PROJECT_DIR"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo "=== Running Python Master Verification in $(pwd) ==="
+echo -e "${BLUE}=== Running Python Master Smart Verification in $(pwd) ===${NC}"
 
-# 2. 检查本地是否存在项目专属入口脚本
+# 2. 核心原则：优先 Hook 用户项目本地专用的 verify.sh
 LOCAL_ENTRYPOINT=""
 if [ -f "./.claude/verify.sh" ]; then
     LOCAL_ENTRYPOINT="./.claude/verify.sh"
@@ -20,50 +21,71 @@ elif [ -f "./verify.sh" ]; then
     LOCAL_ENTRYPOINT="./verify.sh"
 fi
 
-# 如果存在本地定制脚本，优先调起本地脚本
 if [ -n "$LOCAL_ENTRYPOINT" ]; then
-    echo -e "${YELLOW}[!] Found local project entrypoint: ${LOCAL_ENTRYPOINT}${NC}"
+    echo -e "${GREEN}[V] Found user project entrypoint: ${LOCAL_ENTRYPOINT}${NC}"
     chmod +x "$LOCAL_ENTRYPOINT"
     exec "$LOCAL_ENTRYPOINT"
 fi
 
-# 3. 无本地脚本时，走默认的 Python 物理级闭环
-echo "[i] No local entrypoint found. Running standard Python master check..."
+# 3. 智能嗅探项目本地的虚拟环境 (.venv, venv, env)
+PYTHON_BIN="python3"
+PYRIGHT_BIN="pyright"
+RUFF_BIN="ruff"
+PYTEST_BIN="pytest"
 
-# (1) 静态类型检查：优先 pyright，降级 mypy
+if [ -f ".venv/bin/python" ]; then
+    echo -e "${GREEN}[V] Detected virtualenv at .venv/${NC}"
+    PYTHON_BIN=".venv/bin/python"
+    [ -f ".venv/bin/pyright" ] && PYRIGHT_BIN=".venv/bin/pyright"
+    [ -f ".venv/bin/ruff" ] && RUFF_BIN=".venv/bin/ruff"
+    [ -f ".venv/bin/pytest" ] && PYTEST_BIN=".venv/bin/pytest"
+elif [ -f "venv/bin/python" ]; then
+    echo -e "${GREEN}[V] Detected virtualenv at venv/${NC}"
+    PYTHON_BIN="venv/bin/python"
+    [ -f "venv/bin/pyright" ] && PYRIGHT_BIN="venv/bin/pyright"
+    [ -f "venv/bin/ruff" ] && RUFF_BIN="venv/bin/ruff"
+    [ -f "venv/bin/pytest" ] && PYTEST_BIN="venv/bin/pytest"
+fi
+
+# 4. 执行标准 Python 物理级闭环
+echo "[i] Running standard Python master verification loop..."
+
+# (1) 静态类型检查：优先 pyright 严格模式，降级 mypy
 echo "=== [1/3] Running Static Type Checker (Pyright / Mypy) ==="
-if command -v pyright &> /dev/null || npx --no-install pyright --version &> /dev/null 2>&1; then
-    echo "Running pyright..."
-    npx pyright .
+if command -v "$PYRIGHT_BIN" &> /dev/null || npx --no-install pyright --version &> /dev/null 2>&1; then
+    if [ "$PYRIGHT_BIN" = "pyright" ] && command -v npx &> /dev/null; then
+        npx pyright .
+    else
+        "$PYRIGHT_BIN" .
+    fi
 elif command -v mypy &> /dev/null; then
-    echo "Running mypy..."
     mypy .
 else
-    echo -e "${YELLOW}[!] Notice: Neither Pyright nor Mypy found. Skipping type check.${NC}"
+    echo -e "${YELLOW}[!] Notice: Pyright/Mypy not found in PATH. Skipping type check.${NC}"
 fi
-echo -e "${GREEN}[V] Type Check Passed cleanly.${NC}"
+echo -e "${GREEN}[V] Type Check Phase Completed.${NC}"
 
-# (2) 代码质量与 Lint 检查：优先 ruff，降级 flake8
-echo "=== [2/3] Running Linter (Ruff / Flake8) ==="
-if command -v ruff &> /dev/null; then
-    echo "Running ruff check..."
+# (2) 代码质量与 Lint 检查：优先 ruff
+echo "=== [2/3] Running Linter (Ruff) ==="
+if command -v "$RUFF_BIN" &> /dev/null; then
+    "$RUFF_BIN" check .
+elif command -v ruff &> /dev/null; then
     ruff check .
-elif command -v flake8 &> /dev/null; then
-    echo "Running flake8..."
-    flake8 .
 else
-    echo -e "${YELLOW}[!] Notice: No Ruff or Flake8 found. Skipping linter.${NC}"
+    echo -e "${YELLOW}[!] Notice: Ruff not found. Skipping linting.${NC}"
 fi
-echo -e "${GREEN}[V] Linting Check Passed.${NC}"
+echo -e "${GREEN}[V] Linting Phase Completed.${NC}"
 
 # (3) 单元测试检查：pytest
-echo "=== [3/3] Running Tests (Pytest) ==="
-if command -v pytest &> /dev/null; then
+echo "=== [3/3] Running Test Suite (Pytest) ==="
+if command -v "$PYTEST_BIN" &> /dev/null; then
+    "$PYTEST_BIN" -q
+elif command -v pytest &> /dev/null; then
     pytest -q
 elif [ -d "tests" ] || [ -d "test" ]; then
-    python3 -m unittest discover -s .
+    "$PYTHON_BIN" -m unittest discover -s .
 else
-    echo -e "${YELLOW}[!] Notice: No pytest or tests/ directory found, skipping unit tests.${NC}"
+    echo -e "${YELLOW}[!] Notice: No pytest or tests/ directory configured, skipping unit tests.${NC}"
 fi
 
 echo -e "${GREEN}[V] All Python Verification Steps Passed! Code is Master-Level.${NC}"

@@ -1,35 +1,59 @@
 # C++ Master Skill
 
-你现在是 C++ 系统编程与现代架构专家（遵循 C++20/C++23 标准）。你编写的代码必须具备极其严谨的内存安全（RAII）、零成本抽象、无未定义行为（UB）以及最佳运行时性能。
+你现在是 C++ 编译器前端与系统编程物理级专家（遵循 C++20/C++23 标准）。你编写的代码必须追求**绝对的 RAII 内存安全、零未定义行为（UB）、零成本抽象与编译期契约约束**。
 
-## 核心法则 (Core Rules)
+---
 
-1. **RAII 绝对管控资源与内存**：
-   - 彻底废弃裸指针（Raw Pointers）进行所有权管理。所有权转移与分配必须使用 `std::unique_ptr` 或 `std::shared_ptr` / `std::weak_ptr`。
-   - 裸指针或 `std::span` / `std::string_view` 仅能用于非所有权（Non-owning）的借用观察。
-2. **现代 C++20/23 范式**：
-   - 优先使用 `std::optional<T>`、`std::variant<T...>` 和 `std::expected<T, E>` 显式建模可能为空的值或异常结果，禁止通过魔幻返回值（如 -1, NULL）传递错误。
-   - 使用 Concepts (概念) 约束模板泛型参数，规避晦涩难懂的 SFINAE 与长篇编译报错。
-   - 优先选择 `constexpr` / `consteval` 提升编译期计算占比。
-3. **未定义行为 (UB) 与并发防护**：
-   - 严禁悬空引用（Dangling References）与越界访问；严禁未初始化变量直接参与计算。
-   - 跨线程数据共享必须通过 RAII 锁（`std::scoped_lock` 或 `std::unique_lock`）管控，禁止手动进行 `mutex.lock()/unlock()`。
+## 1. 深度编码防御法则 (Hardcore Defensive Rules)
 
-## 闭环验证工作流 (Mandatory Verification Loop)
+### 1.1 所有权与内存管理 (RAII & Memory Safety)
+* **废弃 Naked `delete` 与裸指针所有权**：禁止使用 `new` / `delete` 管理内存。分配独占资源必须使用 `std::make_unique<T>()`，共享资源使用 `std::make_shared<T>()`。
+* **非所有权视图与悬空防护**：
+  * 使用 `std::string_view` 或 `std::span<T>` 代替常量引用传递只读序列，但**绝对禁止将视图作为类成员或异步 Lambda 捕获对象**（极易引发 Use-After-Free）。
+  * 函数返回视图时，其生命周期必须严格绑定于入参生命周期。
+* **移动语义与状态有效性**：被 `std::move` 后的对象处于“有效但未指定”状态。移动操作后禁止再读取该变量，除非对其重新赋值。
 
-在新增、修改或重构任何 `.cpp`, `.hpp`, `.cxx`, `.h` 文件后，**必须**使用 Bash 执行以下统一验证指令：
+### 1.2 未定义行为 (UB) 与隐式转换拦截
+* **禁止隐式类型转换**：单参数构造函数与转换运算符必须声明为 `explicit`，规避意外的隐式类型转换。
+* **严格边界与空指针检查**：
+  * 访问 `std::vector` / `std::array` 时，若索引来源不可信，优先使用 `.at()` 代替 `[]` Operator。
+  * 使用 `std::optional<T>` / `std::expected<T, E>` 表达非确定性结果；在调用 `*opt` 或 `opt->` 前必须用 `.has_value()` 或 `if (opt)` 判空。
+* **严格迭代器失效防护**：在对 `std::vector` 或 `std::unordered_map` 进行遍历时，禁止在循环体内直接执行 `push_back`、`insert` 或 `erase`，除非显式更新迭代器返回值。
+
+### 1.3 C++20/23 泛型与现代并发
+* **Concepts 替换 SFINAE**：所有模板参数必须通过 `requires` 子句或标准 Concepts（如 `std::movable`, `std::derived_from`）约束，禁止写任何晦涩的 `std::enable_if_t`。
+* **RAII 线程安全**：
+  * 跨线程共享数据必须通过 `std::scoped_lock`（多锁）或 `std::unique_lock` 管控，禁止裸调用 `mutex.lock()`。
+  * 优先选择 C++20 `std::jthread`，利用其 RAII 机制自动请求中断并在析构时 `join()`，防止线程死锁或异常导致 `std::terminate`。
+
+---
+
+## 2. LSP (clangd) 深度符号导航协议
+
+在推导与重构复杂 C++ 项目时，你**必须**优先按照以下顺序调用 LSP 工具链：
+
+1. **定位虚函数实现与类继承树**：调用 `mcp__clangd__typeHierarchy` 或 `mcp__clangd__implementations` 查找 Override 虚函数的具体子类位置。
+2. **分析宏展开与模板特化**：遇到复杂的模板特化或宏定义（如 `mcp__clangd__hover`），查看 AST 推导出的真实类型 signature 与展开后的代码。
+3. **查找跨文件引用与 Include 节点**：调用 `mcp__clangd__references` 查找结构体/函数的调用点，通过 `mcp__clangd__incomingCalls` 分析全路径调用链。
+
+---
+
+## 3. 确定性自修正算法 (Self-Correction Protocol)
+
+当 `verify.sh` 拦截并报错时，严格按照以下日志类型定位并修正：
+
+| 错误类型 / Sanitizer 堆栈 | 常见根因 | 物理级标准修正方法 |
+| :--- | :--- | :--- |
+| **`heap-use-after-free`** (ASan) | 访问了已释放的指针、悬空引用或生命周期结束的 `string_view` | 将引用/视图改为深拷贝值传递，或用 `std::shared_ptr` / `std::weak_ptr` 延长生命周期 |
+| **`stack-buffer-overflow`** | 数组/指针越界写入，或 C-Style 字符串未以 `\0` 结尾 | 替换 C 风格数组为 `std::array` / `std::vector`，并强制开启 `.at()` 范围校验 |
+| **`undefined-behavior`** (UBSan) | 整数有符号溢出、空指针解引用或不合规的位移 | 在计算前添加边界判空；对无位移限定的值使用 `std::bit_cast` 或无符号数显式截断 |
+| **`clang-tidy: modernize-use-auto`** | 冗长的类型声明（如迭代器）未遵循现代风格 | 将重复显式的类型推导简化为 `auto` 或 `const auto&` |
+| **`clang-tidy: bugprone-use-after-move`** | 在 `std::move` 之后继续使用被移动的对象 | 重构变量作用域，或者删除不必要的 `std::move` |
+
+---
+
+## 4. 强制闭环验证 (Mandatory Verification)
+
+每完成一次改动，**必须**运行以下命令，直到输出 `All C++ Verification Steps Passed!`：
 
 `bash ~/.claude/skills/cpp-master/verify.sh "$PWD"`
-
-### 验证执行机制 (Verification Routing)
-- `verify.sh` 会自动检测当前项目根目录是否存在定制入口脚本（如 `./.claude/verify.sh` 或 `./verify.sh`）。
-- **如果存在项目入口脚本**：将优先执行项目专属的 CMake/Ninja 编译套件与 Docker 测试矩阵。
-- **如果不存在项目入口脚本**：自动运行标准的 `CMake build` + `clang-tidy/cppcheck` + `CTest` 默认闭环。
-
-### 错误自修正回路 (Self-Correction Loop)
-1. 观察 `verify.sh` 返回的编译日志或静态分析结果。
-2. 如果触发 GCC/Clang 编译器 Warning/Error，或者 `clang-tidy` 发现潜在内存泄露/生命周期风险，仔细阅读完整上下文。
-3. 修改代码后，**再次运行 `bash ~/.claude/skills/cpp-master/verify.sh "$PWD"`**。
-4. 循环迭代，直到脚本输出 `All C++ Verification Steps Passed!`。
-
-未运行 `verify.sh` 并完全通过前，绝不能向用户宣告“任务已完成”。

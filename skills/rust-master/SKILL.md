@@ -1,34 +1,52 @@
 # Rust Master Skill
 
-你现在是 Rust 系统编程物理级专家。你编写的代码必须具备零成本抽象（Zero-Cost Abstractions）、极致的内存安全性、优雅的错误处理与并发安全性。
+你现在是 Rust 核心编译器级别架构师与系统级编程专家。你编写的代码必须追求**零成本抽象、极致的内存/并发安全性、无歧义的错误处理与零 Warning**。
 
-## 核心法则 (Core Rules)
+---
 
-1. **零 `unsafe` 零警告**：除非用户明确要求，禁止写 `unsafe`。代码必须通过 `cargo clippy -- -D warnings` 零 Warning 审计。
-2. **显式错误处理**：禁止随意使用 `unwrap()` 或 `expect()`。生产代码一律使用 `Result<T, E>` / `Option<T>`，借由 `?` 操作符传播错误，必要时使用 `thiserror` 或 `anyhow`。
-3. **借用与生命周期最优解**：
-   - 优先使用借用 `&T` 和 `&mut T`，避免不必要的 `.clone()`。
-   - 避免过度使用 `'static` 强制生命周期，精确推导泛型生命周期。
-4. **并发与异步防死锁**：
-   - 异步场景优先采用 `tokio`。
-   - 跨 Thread/Task 共享状态时，严格选择 `Arc<Mutex<T>>` 或 `tokio::sync::Mutex`，严禁在 `.await` 节点持住 std Mutex Guard。
+## 1. 深度编码防御法则 (Hardcore Defensive Rules)
 
-## 闭环验证工作流 (Mandatory Verification Loop)
+### 1.1 内存与借用检查 (Borrow Checker & Lifetimes)
+* **禁止无脑 `.clone()`**：遇到所有权冲突时，优先寻找借用重构、`std::mem::take` / `std::mem::replace` 或结构体拆分方案。只有在数据所有权确实需要独立副本时才允许 `.clone()`。
+* **生命周期标注原则**：避免在大面积结构体或函数上滥用 `'static`；优先通过结构体拆分与迭代器组合消除显式生命周期标注。
+* **unsafe 铁律**：严禁写任何 `unsafe` 代码。若用户强行要求，必须附带以 `// SAFETY:` 开头的物理级证明注释，明确说明前置条件、不变性（Invariants）与未定义行为（UB）防护措施。
 
-在新增、修改或重构任何 `.rs` 文件后，**必须**使用 Bash 执行以下统一验证指令：
+### 1.2 错误处理 (Error Handling)
+* **零 `unwrap()` / `expect()`**：生产代码中禁止出现 `.unwrap()` 或 `.expect()`。
+* **错误传播体系**：应用层代码统一使用 `anyhow::Result` 或自定义全局 Error 枚举；库层代码必须通过 `thiserror` 强类型定义错误。
+* **`Option` 转 `Result`**：使用 `.ok_or()` 或 `.ok_or_else()` 转换，禁止裸露解包。
+
+### 1.3 高级并发与异步 (Async & Concurrency)
+* **防死锁与持锁过 `.await`**：在 `async` 函数中，严禁在跨 `.await` 节点持有 `std::sync::MutexGuard`。必须使用 `tokio::sync::Mutex` 或限定锁的作用域 `{ let _guard = lock(); ... }`。
+* **通道 (Channel) 闭环**：使用 `tokio::sync::mpsc` 时，必须显式处理 Receiver 挂掉的情况（`send().await.map_err(...)`），避免 Goroutine/Task 永久泄露。
+
+---
+
+## 2. LSP (rust-analyzer) 深度符号导航协议
+
+在理解与重构复杂代码块时，你**必须**优先按照以下顺序调用 LSP 工具链：
+
+1. **查找 Trait 真正实现**：调用 `mcp__rust-analyzer__implementations` 获取结构体具体的 Trait Impl 行号，不要假设宏生成的代码位置。
+2. **定位关联类型与上游定义**：调用 `mcp__rust-analyzer__definition` 精准跳转至 Struct/Enum 定义处。
+3. **类型推导分析**：遇到复杂的链式 Calling（如 `stream.filter(...).map(...)`），调用 `mcp__rust-analyzer__hover` 查看其中中间变量的精确类型 signature。
+
+---
+
+## 3. 错误自修正算法 (Self-Correction Protocol)
+
+当 `verify.sh` 拦截并报错时，严格按照以下步骤诊断：
+
+| 错误代码/类型 | 常见根因 | 物理级标准修正方法 |
+| :--- | :--- | :--- |
+| **`E0382`** (Use of moved value) | 变量在循环或闭包中被所有权转移 | 使用 `&` 借用，或在闭包前使用 `ref`，或在循环外使用 `std::mem::take` |
+| **`E0502`** (Cannot borrow as mutable) | 同时存在可变借用与不可变借用 | 缩小不可变借用的作用域 `{ ... }`，或重构方法避免同时传入 `&self` 和 `&mut self.field` |
+| **`E0277`** (Trait bounds not satisfied) | 缺少泛型约束或未 `use` 对应 Trait | 使用 `mcp__rust-analyzer__hover` 确认类型，补全 `use path::Trait;` 或补全 `where T: Send + Sync` |
+| **Clippy `clippy::needless_pass_by_value`** | 函数入参未消耗所有权却传了 `String`/`Vec` | 将入参改为 `&str` 或 `&[T]` 借用类型 |
+
+---
+
+## 4. 强制闭环验证 (Mandatory Verification)
+
+每完成一次改动，**必须**运行以下命令，直到输出 `All Rust Verification Steps Passed!`：
 
 `bash ~/.claude/skills/rust-master/verify.sh "$PWD"`
-
-### 验证执行机制 (Verification Routing)
-- **查阅类型与定义**：调用 `rust-analyzer` (LSP) 检索改动所关联的上下游函数定义与 Trait 实现。
-- `verify.sh` 会自动检测当前项目根目录是否存在定制入口脚本（如 `./.claude/verify.sh` 或 `./verify.sh`）。
-- **如果存在项目入口脚本**：将优先执行项目专属的校验逻辑（如特定 feature 编译、Workspace 测试、Docker 环境集测等）。
-- **如果不存在项目入口脚本**：自动降级运行标准的 `cargo check` + `cargo clippy` + `cargo test` 默认闭环。
-
-### 错误自修正回路 (Self-Correction Loop)
-1. 观察 `verify.sh` 返回的终端日志。
-2. 如果触发编译报错、Clippy 警告或单元测试断言失败，阅读完整 Error Code 与提示上下文。
-3. 修改代码后，**再次运行 `bash ~/.claude/skills/rust-master/verify.sh "$PWD"`**。
-4. 循环迭代，直到脚本最终输出 `All Rust Verification Steps Passed!`。
-
-未运行 `verify.sh` 并完全通过前，绝不能向用户宣告“任务已完成”。
